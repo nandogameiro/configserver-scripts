@@ -1,0 +1,153 @@
+name: Build cmq release tarball
+
+# This repository ships several products (csf, cmc, cmm, cse, cmq,
+# MailScanner), so this workflow only reacts to releases tagged for cmq.
+# Tag a cmq release as cmq-v<version>, for example cmq-v4.01.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing cmq-v* tag to build and upload to'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  tarball:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'cmq-v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve tag
+        id: tag
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_TAG}" ]; then TAG="${INPUT_TAG}"; else TAG="${EVENT_TAG}"; fi
+          case "${TAG}" in
+            cmq-v*) ;;
+            *) echo "::error::Tag '${TAG}' is not a cmq release tag (expected cmq-v*)"; exit 1 ;;
+          esac
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#cmq-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the tagged tree
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Check the tag matches cmqversion.txt
+        env:
+          TAG_VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          FILE_VERSION="$(tr -d '[:space:]' < cmq/cmqversion.txt)"
+          echo "tag version:  ${TAG_VERSION}"
+          echo "file version: ${FILE_VERSION}"
+          if [ "${TAG_VERSION}" != "${FILE_VERSION}" ]; then
+            echo "::error::cmq/cmqversion.txt says '${FILE_VERSION}' but the tag says '${TAG_VERSION}'. Update cmqversion.txt before tagging, otherwise the UI reports the wrong version."
+            exit 1
+          fi
+
+      - name: Stage the tarball contents
+        run: |
+          set -euo pipefail
+          rm -rf dist stage
+          mkdir -p dist stage
+          cp -a cmq stage/cmq
+          # Git cannot track an empty directory, but the DirectAdmin installer
+          # copies da/* to the plugin root and then expects an images directory
+          # to already exist there. The historic tarballs carried it as an empty
+          # directory, so recreate it here to keep the layout identical.
+          mkdir -p stage/cmq/da/images
+          # Never ship build or VCS metadata
+          find stage -name '.git*' -prune -exec rm -rf {} +
+
+      - name: Build a reproducible tarball
+        id: build
+        run: |
+          set -euo pipefail
+          # Pin every source of nondeterminism (entry order, timestamps,
+          # ownership, gzip header) so that two builds of the same tag produce
+          # a byte identical tarball and the checksum below is meaningful.
+          SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
+          export SOURCE_DATE_EPOCH
+          # GNU format matches the historic tarballs and stores mtime, uid and
+          # gid inline, so pinning them here is enough - no pax headers to
+          # normalise (--pax-option is rejected on non POSIX archives anyway).
+          tar --sort=name \
+              --format=gnu \
+              --mtime="@${SOURCE_DATE_EPOCH}" \
+              --owner=0 --group=0 --numeric-owner \
+              -C stage -cf - cmq \
+            | gzip -9n > dist/cmq.tgz
+          ( cd dist && sha256sum cmq.tgz > cmq.tgz.sha256 )
+          echo "sha256=$(cut -d' ' -f1 < dist/cmq.tgz.sha256)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the tarball unpacks and is complete
+        run: |
+          set -euo pipefail
+          mkdir -p verify
+          tar -xzf dist/cmq.tgz -C verify
+          # The pieces the installers need, including the empty images directory
+          for path in \
+            cmq/install.sh \
+            cmq/install.cpanel.sh \
+            cmq/install.directadmin.sh \
+            cmq/uninstall.sh \
+            cmq/cmq.c \
+            cmq/cmqversion.txt \
+            cmq/cpanel/cmq.cgi \
+            cmq/Modules/ConfigServer/cmqUI.pm \
+            cmq/da/exec/da_cmq.cgi \
+            cmq/da/images
+          do
+            if [ ! -e "verify/${path}" ]; then
+              echo "::error::${path} is missing from the tarball"
+              exit 1
+            fi
+          done
+          # The tarball must reproduce the working tree exactly, ignoring the
+          # empty directory git cannot store
+          diff -r --exclude=images cmq verify/cmq
+          perl -c verify/cmq/Modules/ConfigServer/cmqUI.pm
+          gcc -fsyntax-only verify/cmq/cmq.c
+          echo "tarball verified"
+
+      - name: Upload the tarball to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "${TAG}" \
+            dist/cmq.tgz \
+            dist/cmq.tgz.sha256 \
+            --clobber --repo "${GITHUB_REPOSITORY}"
+
+      - name: Summary
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          SHA256: ${{ steps.build.outputs.sha256 }}
+        run: |
+          {
+            echo "### cmq tarball attached to \`${TAG}\`"
+            echo
+            echo "| asset | sha256 |"
+            echo "| --- | --- |"
+            echo "| \`cmq.tgz\` | \`${SHA256}\` |"
+            echo
+            echo "Verify after downloading:"
+            echo
+            echo '```sh'
+            echo "sha256sum -c cmq.tgz.sha256"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

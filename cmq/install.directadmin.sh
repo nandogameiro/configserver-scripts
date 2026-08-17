@@ -18,7 +18,12 @@
 # this program; if not, see <https://www.gnu.org/licenses>.
 ###############################################################################
 
-mkdir /etc/cmq
+if [ ! -f "cmq.c" ] || [ ! -f "cmqversion.txt" ]; then
+	echo "ERROR: run this installer from within the unpacked cmq source directory"
+	exit 1
+fi
+
+mkdir -p /etc/cmq
 chmod 700 /etc/cmq
 
 mkdir /usr/local/cpanel/whostmgr/docroot/cgi/configserver
@@ -40,10 +45,19 @@ mkdir -p /usr/local/directadmin/plugins/cmq/
 chmod 711 /usr/local/directadmin/plugins/cmq/
 chown diradmin:diradmin /usr/local/directadmin/plugins/cmq/
 cp -avf da/* /usr/local/directadmin/plugins/cmq/
+# The images directory used to arrive as an empty directory inside da/ in the
+# release tarball. Git cannot track an empty directory, so create it here
+# rather than depending on it existing in the source tree
+mkdir -p /usr/local/directadmin/plugins/cmq/images
 cp -avf cmq/* /usr/local/directadmin/plugins/cmq/images/
 
 export PATH=$PATH;
-gcc -o /usr/local/directadmin/plugins/cmq/exec/cmq cmq.c
+# Build with the usual hardening flags and abort if the compile fails, so that
+# a setuid root wrapper is never left half installed
+if ! gcc -O2 -Wall -fstack-protector-strong -D_FORTIFY_SOURCE=2 -o /usr/local/directadmin/plugins/cmq/exec/cmq cmq.c; then
+	echo "ERROR: failed to compile cmq.c - aborting install"
+	exit 1
+fi
 find /usr/local/directadmin/plugins/cmq/ -type d -exec chmod -v 755 {} \;
 find /usr/local/directadmin/plugins/cmq/ -type f -exec chmod -v 644 {} \;
 chown -Rv diradmin:diradmin /usr/local/directadmin/plugins/cmq
