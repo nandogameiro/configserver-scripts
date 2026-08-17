@@ -19,17 +19,25 @@
 ###############################################################################
 PATH=$PATH:/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
-#First replace:
-if [ -e "/usr/local/cpanel/3rdparty/bin/perl" ]; then
-    find ./ -type f -exec sed -i 's%^#\!/usr/bin/perl%#\!/usr/local/cpanel/3rdparty/bin/perl%' {} \;
+# Refuse to run outside the unpacked source tree. The shebang rewrite below
+# used to recurse over the whole working directory, so running this from the
+# wrong place would rewrite unrelated files on the system.
+if [ ! -f "cpanel/cmq.cgi" ] || [ ! -f "cmqversion.txt" ]; then
+	echo "ERROR: run this installer from within the unpacked cmq source directory"
+	exit 1
 fi
 
-mkdir /etc/cmq
+#First replace:
+if [ -e "/usr/local/cpanel/3rdparty/bin/perl" ]; then
+    sed -i 's%^#\!/usr/bin/perl%#\!/usr/local/cpanel/3rdparty/bin/perl%' cpanel/cmq.cgi
+fi
+
+mkdir -p /etc/cmq
 chmod 700 /etc/cmq
 
-mkdir /usr/local/cpanel/whostmgr/docroot/cgi/configserver
+mkdir -p /usr/local/cpanel/whostmgr/docroot/cgi/configserver
 chmod 700 /usr/local/cpanel/whostmgr/docroot/cgi/configserver
-mkdir /usr/local/cpanel/whostmgr/docroot/cgi/configserver/cmq
+mkdir -p /usr/local/cpanel/whostmgr/docroot/cgi/configserver/cmq
 chmod 700 /usr/local/cpanel/whostmgr/docroot/cgi/configserver/cmq
 
 cp -avf cpanel/cmq.cgi /usr/local/cpanel/whostmgr/docroot/cgi/configserver/cmq.cgi
@@ -57,7 +65,7 @@ cp -af cpanel/cmq.tmpl /usr/local/cpanel/whostmgr/docroot/templates/
 
 #Second replace
 if [ -e "/usr/local/cpanel/3rdparty/bin/perl" ]; then
-	find ./ -type f -exec sed -i 's%^#\!/usr/local/cpanel/3rdparty/bin/perl%#\!/usr/bin/perl%' {} \;
+	sed -i 's%^#\!/usr/local/cpanel/3rdparty/bin/perl%#\!/usr/bin/perl%' cpanel/cmq.cgi
 fi
 
 echo "ConfigServer Mail Queues has been installed."

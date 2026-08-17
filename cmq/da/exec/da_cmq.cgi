@@ -44,7 +44,9 @@ if ($ENV{SESSION_ID} =~ /^\w+$/) {
 	}
 }
 if (($session{key} eq "") or ($session{ip} eq "") or ($session{key} ne $ENV{SESSION_KEY})) {
-	&loginfail("Security Error: No valid session key");
+	# This previously called an undefined &loginfail, which aborted with an
+	# "Undefined subroutine" error rather than the intended message
+	print "Security Error: No valid session key\n";
 	exit;
 }
 
@@ -70,7 +72,9 @@ foreach my $pair (@pairs) {
 my $bootstrapcss = "<link rel='stylesheet' href='$images/bootstrap/css/bootstrap.min.css'>";
 my $jqueryjs = "<script src='$images/jquery.min.js'></script>";
 my $bootstrapjs = "<script src='$images/bootstrap/js/bootstrap.min.js'></script>";
-my $fontawesome = "<link rel='stylesheet' href='https://use.fontawesome.com/releases/v5.0.10/css/all.css'>";
+# FontAwesome was pulled from a third party CDN into a root privileged admin
+# page without SRI, and none of its classes are used. Removed.
+my $fontawesome = "";
 
 my $versionfile = "/etc/cmq/cmqversion.txt";
 open (my $IN, "<", $versionfile) or die $!;
