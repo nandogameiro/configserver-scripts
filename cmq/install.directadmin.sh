@@ -45,6 +45,10 @@ mkdir -p /usr/local/directadmin/plugins/cmq/
 chmod 711 /usr/local/directadmin/plugins/cmq/
 chown diradmin:diradmin /usr/local/directadmin/plugins/cmq/
 cp -avf da/* /usr/local/directadmin/plugins/cmq/
+# The images directory used to arrive as an empty directory inside da/ in the
+# release tarball. Git cannot track an empty directory, so create it here
+# rather than depending on it existing in the source tree
+mkdir -p /usr/local/directadmin/plugins/cmq/images
 cp -avf cmq/* /usr/local/directadmin/plugins/cmq/images/
 
 export PATH=$PATH;
